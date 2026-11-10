@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Điểm danh</title>
+<style>
+  :root { --ink:#1b2430; --mute:#64707d; --line:#e3e7ec; --brand:#1f4e8c; --ok:#1d7a46; --warn:#b4541a; --bg:#f5f7fa; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin:0; font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; color:var(--ink); background:var(--bg); }
+  .wrap { max-width: 480px; margin: 0 auto; padding: 18px 16px 40px; }
+  .top { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:14px; }
+  .top b { font-size: 15px; color: var(--brand); letter-spacing:.2px; }
+  .top span { font-size: 12px; color: var(--mute); }
+  .card { background:#fff; border:1px solid var(--line); border-radius:14px; padding:18px; margin-bottom:14px; }
+  h1 { font-size: 21px; margin: 0 0 6px; }
+  p { margin: 6px 0; line-height: 1.45; }
+  .mute { color: var(--mute); font-size: 13px; }
+  label { display:block; font-size: 13px; color: var(--mute); margin: 12px 0 6px; }
+  input { width:100%; font-size: 22px; padding: 12px 14px; border:1.5px solid var(--line); border-radius: 10px; text-transform: uppercase; letter-spacing: 1px; outline: none; }
+  input:focus { border-color: var(--brand); }
+  button.primary { width:100%; margin-top: 14px; padding: 14px; font-size: 18px; font-weight: 600; color:#fff; background: var(--brand); border:0; border-radius: 10px; }
+  button.primary:disabled { opacity: .55; }
+  .msg { margin-top: 12px; padding: 10px 12px; border-radius: 8px; font-size: 14px; display:none; }
+  .msg.err { display:block; background:#fdecea; color:#8a1f11; }
+  .msg.warn { display:block; background:#fff4e5; color:#7a3d00; }
+  .msg.ok { display:block; background:#e8f5ee; color:#14532d; }
+  .who { display:flex; gap:12px; align-items:center; }
+  .tick { width:40px; height:40px; border-radius:50%; background:var(--ok); color:#fff; display:flex; align-items:center; justify-content:center; font-size: 22px; flex: none; }
+  .who b { display:block; font-size: 17px; }
+  .status { display:flex; align-items:center; gap:8px; font-size: 16px; font-weight: 600; margin-bottom: 12px; }
+  .dot { width:10px; height:10px; border-radius:50%; background:#aab3bd; }
+  .dot.live { background:#16a34a; box-shadow: 0 0 0 4px rgba(22,163,74,.18); }
+  .grid { display:grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .opt { font-size: 34px; font-weight: 700; padding: 22px 0; border-radius: 14px; border: 2px solid var(--line); background:#fff; color: var(--ink); }
+  .opt.sel { background: var(--brand); color:#fff; border-color: var(--brand); }
+  .opt:disabled { opacity: .45; }
+  .center { text-align:center; }
+  .big { font-size: 44px; }
+  .small { font-size: 12px; color: var(--mute); margin-top: 14px; line-height: 1.4; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top"><b id="cls">Điểm danh</b><span id="clock"></span></div>
+  <div id="view"></div>
+</div>
+
+<script>
+// ==== LINK ỨNG DỤNG WEB APPS SCRIPT (/exec) — đổi nếu cô tạo bản triển khai mới ====
+var API_URL = 'https://script.google.com/macros/s/AKfycbxGDBNam_gnWbjM1HUVeULBOadKpsjBoiaMigTbjAHqhnXLzyH4fGPh_a1-Yw_k06PH/exec';
+var Q = new URLSearchParams(location.search);
+if (Q.get('api')) API_URL = Q.get('api');
+var BOOT = { status: 'loading', sid: Q.get('s') || '', cls: '', ticket: '', ts: 0 };
+var LS = (function () { try { localStorage.setItem('_t', '1'); localStorage.removeItem('_t'); return localStorage; } catch (e) { var m = {}; return { getItem: function (k) { return m[k] || null; }, setItem: function (k, v) { m[k] = String(v); }, removeItem: function (k) { delete m[k]; } }; } })();
+var S = { sid: BOOT.sid, me: null, round: 0, open: false, active: true, picked: {}, sending: false };
+
+function $(id) { return document.getElementById(id); }
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+function tick() { var d = new Date(); $('clock').textContent = ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2); }
+setInterval(tick, 10000); tick();
+
+// ---- gọi máy chủ (không gửi cookie Google), tự thử lại khi bận / mạng yếu ----
+var FN = { studentLookup: 'lookup', studentUndo: 'undo', studentCheckIn: 'checkin', studentAnswer: 'answer', studentState: 'state', boot: 'boot' };
+function api(name, params) {
+  var q = new URLSearchParams(params || {});
+  if (q.has('sid')) { q.set('ss', q.get('sid')); q.delete('sid'); } // Google chặn tham số tên "sid"
+  q.set('api', FN[name]); q.set('_', Date.now());
+  return fetch(API_URL + '?' + q.toString(), { method: 'GET', credentials: 'omit', cache: 'no-store', redirect: 'follow' })
+    .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
+}
+function call(fn, arg, tries) {
+  tries = tries || 0;
+  var params = typeof arg === 'object' ? arg : { sid: arg };
+  return api(fn, params).then(function (r) {
+    if (r && r.busy && tries < 5) return new Promise(function (res) { setTimeout(res, 700 + Math.random() * 1800); }).then(function () { return call(fn, arg, tries + 1); });
+    return r;
+  }, function (e) {
+    if (tries < 4) return new Promise(function (res) { setTimeout(res, 900 + Math.random() * 2200); }).then(function () { return call(fn, arg, tries + 1); });
+    throw e;
+  });
+}
+
+// ---- mã thiết bị (ngẫu nhiên, lưu trên máy) + mã cấu hình máy (băm) ----
+function deviceId() {
+  var d = LS.getItem('dd_device');
+  if (!d) {
+    d = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : (Date.now().toString(36) + Math.random().toString(36).slice(2));
+    LS.setItem('dd_device', d);
+  }
+  return d;
+}
+function fingerprint() {
+  var parts = [navigator.userAgent, screen.width + 'x' + screen.height + '@' + (window.devicePixelRatio || 1),
+    Intl.DateTimeFormat().resolvedOptions().timeZone, navigator.language, navigator.maxTouchPoints || 0].join('|');
+  // chỉ dùng các đặc điểm giữ nguyên giữa tab thường và tab ẩn danh
+  if (window.crypto && crypto.subtle && window.TextEncoder) {
+    return crypto.subtle.digest('SHA-256', new TextEncoder().encode(parts)).then(function (buf) {
+      return Array.prototype.map.call(new Uint8Array(buf), function (b) { return ('0' + b.toString(16)).slice(-2); }).join('');
+    }).catch(function () { return simpleHash(parts); });
+  }
+  return Promise.resolve(simpleHash(parts));
+}
+function simpleHash(s) { var h = 0; for (var i = 0; i < s.length; i++) { h = (h * 31 + s.charCodeAt(i)) | 0; } return 'h' + (h >>> 0).toString(16); }
+
+// ---- các màn hình ----
+function render() {
+  if (BOOT.cls) $('cls').textContent = 'Lớp ' + BOOT.cls;
+  if (BOOT.status === 'loading') return show('<div class="card center"><div class="big">⏳</div><p class="mute">Đang kết nối…</p></div>');
+  if (BOOT.status === 'neterr') return show('<div class="card center"><div class="big">📶</div><h1>Chưa kết nối được</h1><p class="mute">Mạng yếu. Hãy quét lại mã QR trên màn chiếu.</p></div>');
+  var saved = S.sid ? JSON.parse(LS.getItem('dd_ci_' + S.sid) || 'null') : null;
+  if (saved) { S.me = saved; return renderAnswer(); }
+  if (BOOT.status === 'ok') return renderCheckIn();
+  if (BOOT.status === 'closed') return show('<div class="card center"><div class="big">🔒</div><h1>Đã đóng điểm danh</h1><p>Nếu bạn đến muộn, hãy <b>lên gặp giảng viên</b> để được điểm danh.</p></div>');
+  if (BOOT.status === 'expired') return show('<div class="card center"><div class="big">⏱️</div><h1>Mã QR đã hết hạn</h1><p>Mã QR đổi sau mỗi vài giây. Hãy <b>quét lại mã đang hiển thị trên màn chiếu</b>.</p></div>');
+  show('<div class="card center"><div class="big">📚</div><h1>Buổi học chưa mở</h1><p class="mute">Buổi học chưa bắt đầu hoặc đã kết thúc. Hãy quét mã QR khi giảng viên chiếu lên.</p></div>');
+}
+function show(html) { $('view').innerHTML = html; }
+
+function renderCheckIn() {
+  show('<div class="card"><h1>' + (BOOT.online ? 'Tham gia trả lời câu hỏi' : 'Điểm danh') + '</h1><p class="mute">Nhập mã sinh viên của bạn.</p>' +
+    '<label for="mssv">Mã sinh viên (MSSV)</label><input id="mssv" autocomplete="off" autocapitalize="characters" inputmode="text" placeholder="VD: 23D100123">' +
+    '<button class="primary" id="go">Tiếp tục</button><div id="m" class="msg"></div>' +
+    '<p class="small">Hệ thống chỉ ghi nhận MSSV và một mã ẩn danh của thiết bị để phòng điểm danh hộ. Mỗi thiết bị nên dùng cho một sinh viên.</p></div>');
+  var inp = $('mssv'); inp.focus();
+  inp.addEventListener('keydown', function (e) { if (e.key === 'Enter') doCheckIn(); });
+  $('go').onclick = doCheckIn;
+}
+function msg(cls, text) { var m = $('m'); if (!m) return; m.className = 'msg ' + cls; m.textContent = text; }
+
+function resetGo() { var g = $('go'); if (g) { g.disabled = false; g.textContent = 'Tiếp tục'; } }
+// Bước 1: nhập MSSV -> máy chủ trả họ tên để SV tự xác nhận
+function doCheckIn() {
+  var v = $('mssv').value.replace(/\s+/g, '').toUpperCase();
+  if (v.length < 4) return msg('err', 'Vui lòng nhập MSSV.');
+  $('go').disabled = true; $('go').textContent = 'Đang kiểm tra…'; msg('', '');
+  call('studentLookup', { sid: S.sid, ticket: BOOT.ticket, ts: BOOT.ts, mssv: v }).then(function (r) {
+    if (r && r.ok) return renderConfirm(r);
+    resetGo(); msg('err', (r && r.msg) || 'Không gửi được, thử lại.');
+    if (r && r.expired) { BOOT.status = 'expired'; setTimeout(render, 2500); }
+  }).catch(function () { resetGo(); msg('err', 'Mạng yếu, chưa gửi được. Bấm lại.'); });
+}
+// Bước 2: xác nhận đúng tên rồi mới ghi điểm danh
+function renderConfirm(r) {
+  show('<div class="card center"><p class="mute">Bạn có phải là</p><h1 style="font-size:24px">' + esc(r.name) + '</h1><p class="mute" style="font-size:17px;letter-spacing:1px">' + esc(r.mssv) + '</p>' +
+    '<button class="primary" id="yes">' + (BOOT.online ? 'Đúng, tham gia' : 'Đúng, điểm danh') + '</button>' +
+    '<button class="primary" id="no" style="background:#fff;color:var(--ink);border:1.5px solid var(--line)">Không phải, nhập lại</button><div id="m" class="msg"></div></div>');
+  $('no').onclick = function () { renderCheckIn(); $('mssv').value = r.mssv; $('mssv').select(); };
+  $('yes').onclick = function () {
+    $('yes').disabled = true; $('no').disabled = true; $('yes').textContent = 'Đang gửi…';
+    fingerprint().then(function (fp) {
+      return call('studentCheckIn', { sid: S.sid, ticket: BOOT.ticket, ts: BOOT.ts, mssv: r.mssv, deviceId: deviceId(), fp: fp });
+    }).then(function (x) {
+      if (x && x.ok) {
+        var me = { mssv: x.mssv, name: x.name, time: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }), flag: x.flagged ? x.flagMsg : '' };
+        LS.setItem('dd_ci_' + S.sid, JSON.stringify(me));
+        S.me = me; renderAnswer();
+      } else {
+        $('yes').disabled = false; $('no').disabled = false; $('yes').textContent = 'Đúng, điểm danh';
+        msg('err', (x && x.msg) || 'Không gửi được, thử lại.');
+        if (x && x.expired) { BOOT.status = 'expired'; setTimeout(render, 2500); }
+      }
+    }).catch(function () { $('yes').disabled = false; $('no').disabled = false; $('yes').textContent = 'Đúng, điểm danh'; msg('err', 'Mạng yếu, chưa gửi được. Bấm lại.'); });
+  };
+}
+// SV nhập nhầm: được tự gỡ trong thời hạn lượt quét (khoảng 3 phút), trên chính máy này
+var BOOT_AT = Date.now();
+function canUndo() { return !!BOOT.ticket && Date.now() - BOOT_AT < 170000; }
+function undo() {
+  var b = $('undo'); b.disabled = true; b.textContent = 'Đang gỡ…';
+  call('studentUndo', { sid: S.sid, ticket: BOOT.ticket, ts: BOOT.ts, mssv: S.me.mssv, deviceId: deviceId() }).then(function (r) {
+    if (r && r.ok) {
+      LS.removeItem('dd_ci_' + S.sid); S.me = null; S.picked = {};
+      for (var i = 1; i <= 50; i++) LS.removeItem('dd_ans_' + S.sid + '_' + i);
+      clearTimeout(pollTimer); renderCheckIn(); msg('ok', 'Đã gỡ điểm danh của ' + r.name + '. Hãy nhập lại MSSV của bạn.');
+    } else { b.disabled = false; b.textContent = 'Nhập nhầm MSSV? Sửa lại'; msg('warn', (r && r.msg) || 'Chưa gỡ được.'); }
+  }).catch(function () { b.disabled = false; b.textContent = 'Nhập nhầm MSSV? Sửa lại'; msg('err', 'Mạng yếu, thử lại.'); });
+}
+
+function renderAnswer() {
+  var me = S.me;
+  show('<div class="card"><div class="who"><div class="tick">✓</div><div><b>' + esc(me.name) + '</b><span class="mute">' + esc(me.mssv) + ' · ' + (BOOT.online ? 'đã tham gia' : 'đã điểm danh') + ' lúc ' + esc(me.time) + '</span></div></div>' +
+    (me.flag ? '<div class="msg warn">Lưu ý: ' + esc(me.flag) + '. Giảng viên sẽ kiểm tra lại.</div>' : '') +
+    (canUndo() ? '<button id="undo" style="margin-top:12px;background:none;border:0;color:var(--brand);font-size:14px;text-decoration:underline;padding:0">Nhập nhầm MSSV? Sửa lại</button>' : '') + '</div>' +
+    '<div class="card"><div class="status"><span class="dot" id="dot"></span><span id="st">Đang tải…</span></div>' +
+    '<div class="grid">' + ['A', 'B', 'C', 'D'].map(function (o) { return '<button class="opt" data-o="' + o + '">' + o + '</button>'; }).join('') + '</div>' +
+    '<div id="m" class="msg"></div><p class="small">Giữ trang này mở trong suốt buổi học. Khi giảng viên chiếu câu hỏi, chọn đáp án ở đây — không cần quét lại mã. Có thể đổi đáp án cho tới khi câu hỏi được đóng.</p></div>');
+  Array.prototype.forEach.call(document.querySelectorAll('.opt'), function (b) { b.onclick = function () { answer(b.getAttribute('data-o')); }; });
+  if ($('undo')) { $('undo').onclick = undo; setTimeout(function () { var u = $('undo'); if (u) u.remove(); }, Math.max(0, 170000 - (Date.now() - BOOT_AT))); }
+  paint(); poll();
+}
+
+function paint() {
+  var st = $('st'); if (!st) return;
+  var picked = S.picked[S.round] || LS.getItem('dd_ans_' + S.sid + '_' + S.round);
+  if (!S.active) { st.textContent = 'Buổi học đã kết thúc. Cảm ơn bạn!'; $('dot').className = 'dot'; }
+  else if (S.open) { st.textContent = 'Câu ' + S.round + ' đang mở' + (picked ? ' — bạn đã chọn ' + picked : ''); $('dot').className = 'dot live'; }
+  else { st.textContent = S.round ? 'Câu ' + S.round + ' đã đóng. Chờ câu tiếp theo…' : 'Chưa có câu hỏi. Chờ giảng viên…'; $('dot').className = 'dot'; }
+  Array.prototype.forEach.call(document.querySelectorAll('.opt'), function (b) {
+    var o = b.getAttribute('data-o');
+    b.classList.toggle('sel', !!picked && o === picked);
+    b.disabled = !S.active || S.sending;
+  });
+}
+
+function answer(o) {
+  if (S.sending) return;
+  S.sending = true; paint(); msg('', '');
+  call('studentAnswer', { sid: S.sid, mssv: S.me.mssv, deviceId: deviceId(), choice: o, round: S.open ? S.round : 0 }).then(function (r) {
+    S.sending = false;
+    if (r && r.ok) {
+      S.round = r.round; S.open = true; S.picked[r.round] = r.choice;
+      LS.setItem('dd_ans_' + S.sid + '_' + r.round, r.choice);
+      msg('ok', 'Đã ghi nhận câu ' + r.round + ': ' + r.choice + (r.changed ? ' (đã đổi đáp án)' : ''));
+    } else {
+      if (r && typeof r.round === 'number') { S.round = r.round; S.open = !!r.open; }
+      msg('warn', (r && r.msg) || 'Chưa gửi được.');
+    }
+    paint();
+  }).catch(function () { S.sending = false; paint(); msg('err', 'Mạng yếu, chưa gửi được. Bấm lại.'); });
+}
+
+var pollTimer = null;
+function poll() {
+  clearTimeout(pollTimer);
+  if (document.hidden) return;
+  call('studentState', { sid: S.sid }, 3).then(function (r) {
+    if (r) { S.active = r.active; S.round = r.round || 0; S.open = !!r.open; paint(); }
+    if (S.active) pollTimer = setTimeout(poll, 12000);
+  }, function () { pollTimer = setTimeout(poll, 15000); });
+}
+document.addEventListener('visibilitychange', function () { if (!document.hidden && S.me) poll(); });
+
+// ---- khởi động: kiểm tra mã QR với máy chủ ----
+render();
+var savedCi = S.sid ? LS.getItem('dd_ci_' + S.sid) : null;
+call('boot', { s: Q.get('s') || '', t: Q.get('t') || '' }, 2).then(function (b) {
+  BOOT = b; BOOT_AT = Date.now(); S.sid = b.sid || S.sid;
+  if (savedCi && b.status !== 'nosession') S.active = true;
+  render();
+}, function () {
+  if (savedCi) { BOOT.status = 'ok'; render(); } else { BOOT.status = 'neterr'; render(); }
+});
+</script>
+</body>
+</html>
