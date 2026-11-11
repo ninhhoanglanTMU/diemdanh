@@ -50,7 +50,6 @@
 // ==== LINK ỨNG DỤNG WEB APPS SCRIPT (/exec) — đổi nếu cô tạo bản triển khai mới ====
 var API_URL = 'https://script.google.com/macros/s/AKfycbxGDBNam_gnWbjM1HUVeULBOadKpsjBoiaMigTbjAHqhnXLzyH4fGPh_a1-Yw_k06PH/exec';
 var Q = new URLSearchParams(location.search);
-if (Q.get('api')) API_URL = Q.get('api');
 var BOOT = { status: 'loading', sid: Q.get('s') || '', cls: '', ticket: '', ts: 0 };
 var LS = (function () { try { localStorage.setItem('_t', '1'); localStorage.removeItem('_t'); return localStorage; } catch (e) { var m = {}; return { getItem: function (k) { return m[k] || null; }, setItem: function (k, v) { m[k] = String(v); }, removeItem: function (k) { delete m[k]; } }; } })();
 var S = { sid: BOOT.sid, me: null, round: 0, open: false, active: true, picked: {}, sending: false };
@@ -115,12 +114,18 @@ function render() {
   if (BOOT.status === 'expired') return show('<div class="card center"><div class="big">⏱️</div><h1>Mã QR đã hết hạn</h1><p>Mã QR đổi sau mỗi vài giây. Hãy <b>quét lại mã đang hiển thị trên màn chiếu</b>.</p></div>');
   show('<div class="card center"><div class="big">📚</div><h1>Buổi học chưa mở</h1><p class="mute">Buổi học chưa bắt đầu hoặc đã kết thúc. Hãy quét mã QR khi giảng viên chiếu lên.</p></div>');
 }
-function show(html) { $('view').innerHTML = html; }
+// Trình duyệt bên trong ứng dụng Teams hay bị xoá dữ liệu khi chuyển ứng dụng -> khuyên mở bằng Safari/Chrome
+function inTeams() { return /Teams\/|MSTeams|TeamsMobile|Microsoft Teams/i.test(navigator.userAgent || ''); }
+function show(html) {
+  var tip = inTeams() ? '<div class="msg warn" style="display:block;margin:0 0 14px">Bạn đang mở trang trong ứng dụng Teams. Để không bị mất trạng thái khi chuyển qua lại, hãy bấm <b>⋯</b> (hoặc biểu tượng la bàn) → <b>Mở bằng trình duyệt</b> (<i>Open in browser</i>).</div>' : '';
+  $('view').innerHTML = tip + html;
+}
 
 function renderCheckIn() {
   show('<div class="card"><h1>' + (BOOT.online ? 'Tham gia trả lời câu hỏi' : 'Điểm danh') + '</h1><p class="mute">Nhập mã sinh viên của bạn.</p>' +
     '<label for="mssv">Mã sinh viên (MSSV)</label><input id="mssv" autocomplete="off" autocapitalize="characters" inputmode="text" placeholder="VD: 23D100123">' +
     '<button class="primary" id="go">Tiếp tục</button><div id="m" class="msg"></div>' +
+    (BOOT.online ? '<p class="small"><b>Mẹo:</b> nên mở link bằng Safari hoặc Chrome thay vì trình duyệt trong Teams, để trang không bị tải lại khi bạn chuyển ứng dụng.</p>' : '') +
     '<p class="small">Hệ thống chỉ ghi nhận MSSV và một mã ẩn danh của thiết bị để phòng điểm danh hộ. Mỗi thiết bị nên dùng cho một sinh viên.</p></div>');
   var inp = $('mssv'); inp.focus();
   inp.addEventListener('keydown', function (e) { if (e.key === 'Enter') doCheckIn(); });
@@ -184,7 +189,7 @@ function renderAnswer() {
     (canUndo() ? '<button id="undo" style="margin-top:12px;background:none;border:0;color:var(--brand);font-size:14px;text-decoration:underline;padding:0">Nhập nhầm MSSV? Sửa lại</button>' : '') + '</div>' +
     '<div class="card"><div class="status"><span class="dot" id="dot"></span><span id="st">Đang tải…</span></div>' +
     '<div class="grid">' + ['A', 'B', 'C', 'D'].map(function (o) { return '<button class="opt" data-o="' + o + '">' + o + '</button>'; }).join('') + '</div>' +
-    '<div id="m" class="msg"></div><p class="small">Giữ trang này mở trong suốt buổi học. Khi giảng viên chiếu câu hỏi, chọn đáp án ở đây — không cần quét lại mã. Có thể đổi đáp án cho tới khi câu hỏi được đóng.</p></div>');
+    '<div id="m" class="msg"></div><p class="small">Giữ trang này mở trong suốt buổi học. Khi giảng viên chiếu câu hỏi, chọn đáp án ở đây — không cần quét lại mã. <b>Mỗi câu chỉ chọn một lần</b>, hãy suy nghĩ kỹ trước khi bấm.</p></div>');
   Array.prototype.forEach.call(document.querySelectorAll('.opt'), function (b) { b.onclick = function () { answer(b.getAttribute('data-o')); }; });
   if ($('undo')) { $('undo').onclick = undo; setTimeout(function () { var u = $('undo'); if (u) u.remove(); }, Math.max(0, 170000 - (Date.now() - BOOT_AT))); }
   paint(); poll();
@@ -199,7 +204,8 @@ function paint() {
   Array.prototype.forEach.call(document.querySelectorAll('.opt'), function (b) {
     var o = b.getAttribute('data-o');
     b.classList.toggle('sel', !!picked && o === picked);
-    b.disabled = !S.active || S.sending;
+    // chế độ chốt đáp án: đã chọn câu đang mở thì khoá các nút
+    b.disabled = !S.active || S.sending || (S.lock !== false && S.open && !!picked);
   });
 }
 
@@ -213,7 +219,8 @@ function answer(o) {
       LS.setItem('dd_ans_' + S.sid + '_' + r.round, r.choice);
       msg('ok', 'Đã ghi nhận câu ' + r.round + ': ' + r.choice + (r.changed ? ' (đã đổi đáp án)' : ''));
     } else {
-      if (r && typeof r.round === 'number') { S.round = r.round; S.open = !!r.open; }
+      if (r && r.locked) { S.picked[r.round] = r.choice; LS.setItem('dd_ans_' + S.sid + '_' + r.round, r.choice); }
+      if (r && typeof r.round === 'number') { S.round = r.round; S.open = r.locked ? true : !!r.open; }
       msg('warn', (r && r.msg) || 'Chưa gửi được.');
     }
     paint();
@@ -225,13 +232,17 @@ function poll() {
   clearTimeout(pollTimer);
   if (document.hidden) return;
   call('studentState', { sid: S.sid }, 3).then(function (r) {
-    if (r) { S.active = r.active; S.round = r.round || 0; S.open = !!r.open; paint(); }
+    if (r) { S.active = r.active; S.round = r.round || 0; S.open = !!r.open; S.lock = r.lock; paint(); }
     if (S.active) pollTimer = setTimeout(poll, 12000);
   }, function () { pollTimer = setTimeout(poll, 15000); });
 }
 document.addEventListener('visibilitychange', function () { if (!document.hidden && S.me) poll(); });
 
 // ---- khởi động: kiểm tra mã QR với máy chủ ----
+if (API_URL.indexOf('script.google.com') < 0) {
+  show('<div class="card center"><div class="big">⚙️</div><h1>Trang chưa được cấu hình</h1><p class="mute">Giảng viên cần sửa dòng <b>var API_URL</b> trong file index.html thành link /exec của Apps Script.</p></div>');
+  throw new Error('API_URL chưa cấu hình');
+}
 render();
 var savedCi = S.sid ? LS.getItem('dd_ci_' + S.sid) : null;
 call('boot', { s: Q.get('s') || '', t: Q.get('t') || '' }, 2).then(function (b) {
