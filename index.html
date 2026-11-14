@@ -38,6 +38,7 @@
   .center { text-align:center; }
   .big { font-size: 44px; }
   .small { font-size: 12px; color: var(--mute); margin-top: 14px; line-height: 1.4; }
+  .hidden { display:none !important; }
 </style>
 </head>
 <body>
@@ -188,8 +189,10 @@ function renderAnswer() {
     (me.flag ? '<div class="msg warn">Lưu ý: ' + esc(me.flag) + '. Giảng viên sẽ kiểm tra lại.</div>' : '') +
     (canUndo() ? '<button id="undo" style="margin-top:12px;background:none;border:0;color:var(--brand);font-size:14px;text-decoration:underline;padding:0">Nhập nhầm MSSV? Sửa lại</button>' : '') + '</div>' +
     '<div class="card"><div class="status"><span class="dot" id="dot"></span><span id="st">Đang tải…</span></div>' +
-    '<div class="grid">' + ['A', 'B', 'C', 'D'].map(function (o) { return '<button class="opt" data-o="' + o + '">' + o + '</button>'; }).join('') + '</div>' +
-    '<div id="m" class="msg"></div><p class="small">Giữ trang này mở trong suốt buổi học. Khi giảng viên chiếu câu hỏi, chọn đáp án ở đây — không cần quét lại mã. <b>Mỗi câu chỉ chọn một lần</b>, hãy suy nghĩ kỹ trước khi bấm.</p></div>');
+    '<div id="wait" class="center" style="padding:6px 0 4px"><div class="big">⏳</div><p><b>Đừng đóng trang này.</b></p><p class="mute">Khi giảng viên mở câu hỏi trắc nghiệm, các lựa chọn A, B, C, D sẽ tự hiện ở đây. Không cần quét lại mã.</p></div>' +
+    '<div id="qbox" class="hidden"><div class="grid">' + ['A', 'B', 'C', 'D'].map(function (o) { return '<button class="opt" data-o="' + o + '">' + o + '</button>'; }).join('') + '</div>' +
+    '<p class="small"><b>Mỗi câu chỉ chọn một lần</b>, hãy suy nghĩ kỹ trước khi bấm.</p></div>' +
+    '<div id="m" class="msg"></div></div>');
   Array.prototype.forEach.call(document.querySelectorAll('.opt'), function (b) { b.onclick = function () { answer(b.getAttribute('data-o')); }; });
   if ($('undo')) { $('undo').onclick = undo; setTimeout(function () { var u = $('undo'); if (u) u.remove(); }, Math.max(0, 170000 - (Date.now() - BOOT_AT))); }
   paint(); poll();
@@ -199,8 +202,14 @@ function paint() {
   var st = $('st'); if (!st) return;
   var picked = S.picked[S.round] || LS.getItem('dd_ans_' + S.sid + '_' + S.round);
   if (!S.active) { st.textContent = 'Buổi học đã kết thúc. Cảm ơn bạn!'; $('dot').className = 'dot'; }
-  else if (S.open) { st.textContent = 'Câu ' + S.round + ' đang mở' + (picked ? ' — bạn đã chọn ' + picked : ''); $('dot').className = 'dot live'; }
-  else { st.textContent = S.round ? 'Câu ' + S.round + ' đã đóng. Chờ câu tiếp theo…' : 'Chưa có câu hỏi. Chờ giảng viên…'; $('dot').className = 'dot'; }
+  else if (S.open) { st.textContent = 'Câu ' + S.round + (picked ? ' — bạn đã chọn ' + picked : ' — hãy chọn đáp án'); $('dot').className = 'dot live'; }
+  else if (S.round) { st.textContent = 'Câu ' + S.round + ' đã đóng' + (picked ? ' (bạn đã chọn ' + picked + ')' : '') + '. Chờ câu tiếp theo…'; $('dot').className = 'dot'; }
+  else { st.textContent = (BOOT.online ? 'Bạn đã tham gia lớp.' : 'Bạn đã điểm danh.') + ' Chờ giảng viên mở câu hỏi…'; $('dot').className = 'dot'; }
+  // chỉ hiện A/B/C/D khi có câu hỏi đang mở
+  var showQ = S.active && S.open;
+  if ($('qbox')) $('qbox').classList.toggle('hidden', !showQ);
+  if ($('wait')) $('wait').classList.toggle('hidden', showQ || !S.active);
+  if (showQ && S.lastOpen !== S.round) { S.lastOpen = S.round; msg('', ''); if (navigator.vibrate) { try { navigator.vibrate(120); } catch (e) { } } }
   Array.prototype.forEach.call(document.querySelectorAll('.opt'), function (b) {
     var o = b.getAttribute('data-o');
     b.classList.toggle('sel', !!picked && o === picked);
@@ -233,7 +242,7 @@ function poll() {
   if (document.hidden) return;
   call('studentState', { sid: S.sid }, 3).then(function (r) {
     if (r) { S.active = r.active; S.round = r.round || 0; S.open = !!r.open; S.lock = r.lock; paint(); }
-    if (S.active) pollTimer = setTimeout(poll, 12000);
+    if (S.active) pollTimer = setTimeout(poll, 5000 + Math.random() * 2000);
   }, function () { pollTimer = setTimeout(poll, 15000); });
 }
 document.addEventListener('visibilitychange', function () { if (!document.hidden && S.me) poll(); });
